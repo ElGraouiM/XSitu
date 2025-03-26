@@ -36,27 +36,40 @@ n_zones <- function(x, min_area, m=3) {
 
 make_zones <- function(x, range, n, spread=TRUE) {
 
-	if (spread) {
-		rr <- terra::rasterize(range, terra::rast(x), 1:nrow(range))
+	if (spread) { # spread sample across polygons
+		drange <- terra::disagg(range)
+		rr <- terra::rasterize(drange, terra::rast(x), 1:nrow(drange))
 		p <- terra::as.polygons(rr)
 		p$area <- terra::expanse(p, "km") / 1000 
 		avga <- sum(p$area) / n
 		p$n <- round(p$area / avga)
 		totn <- sum(p$n)
 		while (totn > n) {
-			p$error[i] <- p$area[i] - p$n[i] * avga
+#			p$error[i] <- p$area[i] - p$n[i] * avga
+			p$error <- p$area - p$n * avga
 			i <- which.max(p$error)
 			p$n[i] <- p$n[i] - 1
 			totn <- sum(p$n)
 		}
 		while (totn < n) {
-			p$error[i] <- p$area[i] - p$n[i] * avga
+#			p$error[i] <- p$area[i] - p$n[i] * avga
+			p$error <- p$area - p$n * avga
 			i <- which.min(p$error)
 			p$n[i] <- p$n[i] + 1
 			totn <- sum(p$n)
 		}
 		p <- p[p$n > 0, ]
-		seeds <- lapply(1:nrow(p), \(i) terra::spatSample(p[i,], p$n[i])) |> terra::vect() |> terra::crds()
+		seeds <- lapply(1:nrow(p), \(i) {
+			out <- terra::spatSample(p[i,], p$n[i])
+			if (nrow(out) < p$n[i]) {
+				out <- terra::spatSample(p[i,], p$n[i] * 10)
+				out <- out[sample(nrow(out), p$n[i]), ]
+			}
+			out
+		}) 
+			
+		seeds <- terra::vect(seeds) |> terra::crds()
+		
 		km <- terra::k_means(terra::mask(x, rr), seeds, iter.max = 25)
 	} else {
 
@@ -68,18 +81,18 @@ make_zones <- function(x, range, n, spread=TRUE) {
 }
 
 
-get_samplesize <- function(range, fun=n_zones, ...) {
-	if (inherits(range, "SpatRaster")) {
-		range <- terra::as.polygons(range)
-		range <- range[range[,1,drop=TRUE]==1]
-	} else if (!inherits(range, "SpatVector")) {
-		stop("range should be a SpatVector")
+get_samplesize <- function(x, fun=n_zones, ...) {
+	if (inherits(x, "SpatRaster")) {
+		x <- terra::as.polygons(x)
+		x <- x[x[,1,drop=TRUE]==1]
+	} else if (!inherits(x, "SpatVector")) {
+		stop("x should be a SpatVector")
 	}
-	a <- terra::expanse(range, unit="km")
+	a <- terra::expanse(x, unit="km")
 	n <- fun(a, ...)
 	#n <- max(nmin, n)
 	#z <- max(1, min(n, round(a/min_area)))
-	return(list(range=range, area=a, n=n))
+	return(list(range=x, area=a, n=n))
 }
 
 
@@ -187,8 +200,13 @@ get_network2 <- function(regions, sample, maxdist=1500) {
 
 	adj <- terra::adjacent(regions)
 	adj <- data.frame(unique(t(apply(adj, 1, sort))))
-	colnames(adj) <- c("from", "to")
-	adj$adj <- 1
+	if (ncol(adj) == 0) {
+		adj <- data.frame(from=NA, to=NA, adj=NA)
+		adj <- adj[0,]
+	} else {
+		colnames(adj) <- c("from", "to")
+		adj$adj <- 1
+	}
 	if (np > 1) {
 		up <- sort(unique(x$pid))
 		dx <- as.matrix(terra::distance(x))
@@ -203,16 +221,18 @@ get_network2 <- function(regions, sample, maxdist=1500) {
 				ss <- s[rid == pp, ,drop=FALSE]
 				j <- which.min(apply(ss, 1, min))
 				k <- which.min(ss[j, ])
-				adj <- rbind(adj, c(sort(as.integer(c(rownames(ss)[j], colnames(ss)[k]))), 0))
+				add <- c(sort(as.integer(c(rownames(ss)[j], colnames(ss)[k]))), 0)
+				add <- data.frame(from=add[1], to=add[2], adj=add[3])
+				adj <- rbind(adj, add)
 			}
 		}
 		adj <- unique(adj)
 	}
 
 	colnames(xy) <- c("xf", "yf")
-	adj <- cbind(adj, xy[adj$from, ])
+	adj <- cbind(adj, xy[adj$from, , drop=FALSE])
 	colnames(xy) <- c("xt", "yt")
-	adj <- cbind(adj, xy[adj$to, ])
+	adj <- cbind(adj, xy[adj$to, , drop=FALSE])
 
 	adj <- cbind(adj, w=1, dst=terra::distance(x[adj$from, ], x[adj$to, ], pairwise=TRUE, unit="m")/1000)
 
@@ -232,8 +252,11 @@ get_network2 <- function(regions, sample, maxdist=1500) {
 		}
 	}
 
-	adj[adj$dst < maxdist, ]
+#	mxd <- median(adj$dst) * 3
+#	adj$dst[adj$dst > mxd]] <- mxd
 
+	adj$dst[adj$dst > maxdist] <- maxdist	
+	adj
 }
 
 
@@ -247,9 +270,6 @@ XC <- function(regions, sample, env=NULL, envfun=NULL, minssize=10, maxlink=1500
 
 	stopifnot(minssize > 0)
 
-	if (nrow(sample) <= 0) {
-		list(score=0)
-	}
 #
 # weed=TRUE
 # land=NULL
@@ -258,8 +278,7 @@ XC <- function(regions, sample, env=NULL, envfun=NULL, minssize=10, maxlink=1500
 	if (return_network) {
 		return(make_spatvect(rr))
 	}
-
-
+	
 	if (!is.null(env)) {
 		envd <- as.matrix(EnvDist(env, regions, envfun))
 		rr$envdst <- envd[as.matrix(rr[,1:2])]
@@ -273,6 +292,11 @@ XC <- function(regions, sample, env=NULL, envfun=NULL, minssize=10, maxlink=1500
 	y <- unique(terra::extract(regions, sample)[,2])
 	rr$w2 <- rowSums(!matrix(as.matrix(rr[,1:2]) %in% y, ncol=2)) / 2
 	igraph::E(gg)$weight2 <- rr$dst * rr$w2
+
+	if (nrow(sample) <= 0) {
+		return(list(XC=0, dist=rr))
+	}
+
 
 	n <- igraph::count_components(gg)
 	score <- nodes <- rep(NA, n)
