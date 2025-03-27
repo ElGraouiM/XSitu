@@ -220,12 +220,11 @@ XC <- function(regions, sample, env=NULL, envfun=NULL, minssize=10, maxdist=1500
 		# sum geo and env dist
 		rr$dst <- rr$dst + rr$envdst
 	} 
-	
 	gg <- igraph::graph_from_data_frame(rr, directed = FALSE)
 	igraph::E(gg)$weight <- rr$dst * rr$w
 	y <- unique(terra::extract(regions, sample)[,2])
-	rr$w2 <- rowSums(!matrix(as.matrix(rr[,1:2]) %in% y, ncol=2)) / 2
-	igraph::E(gg)$weight2 <- rr$dst * rr$w2
+	rr$w <- rowSums(!matrix(as.matrix(rr[,1:2]) %in% y, ncol=2)) / 2
+	igraph::E(gg)$weight2 <- rr$dst * rr$w
 
 	if (nrow(sample) <= 0) {
 		return(list(XC=0, dist=rr))

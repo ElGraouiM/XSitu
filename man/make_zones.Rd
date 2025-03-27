@@ -35,7 +35,8 @@ xy <- c(terra::init(x, "x"), terra::init(x, "y"))
 
 set.seed(321)
 zones <- make_zones(xy, k$range, k$n, spread=TRUE)
-terra::plot(zones, col=rainbow(25))
+terra::plot(zones, col=rainbow(20))
+terra::text(zones)
 }
 
 \keyword{spatial}

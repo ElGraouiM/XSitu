@@ -44,7 +44,8 @@ sp$label <- "occurrence"
 
 terra::plot(xr, levels=c("Removed", "Added", "Kept"), type="classes", plg=list(title="Range"), mar=c(1,1,1,6))
 terra::lines(land, lwd=4, col="light gray")
-terra::plot(bb, "size", col=c("green", "red"), lwd=2, add=TRUE, sort=FALSE, type="classes", plg=list(x=43.1, y=2.46, title="Buffer", lwd=2))
+terra::plot(bb, "size", col=c("green", "red"), lwd=2, add=TRUE, sort=FALSE, type="classes", 
+				plg=list(x=43.1, y=2.46, title="Buffer", lwd=2))
 terra::plot(sp, "label", col="blue", add=TRUE, plg=list(x=43.1, y=-2))
 }
 
