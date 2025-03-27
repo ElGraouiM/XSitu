@@ -1,1 +1,1 @@
-export(adjust_range, get_cover, branch_length, get_samplesize, make_zones, n_zones, XC)
+export(adjust_range, get_samplesize, make_zones, XC)

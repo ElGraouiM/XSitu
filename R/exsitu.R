@@ -1,17 +1,25 @@
 
 
-adjust_range <- function(x, sp, land, CAmin=50000, CAmax=250000) { 
+adjust_range <- function(x, sp, land, include=10, exclude=100) { 
+
+	stopifnot(include <= exclude)
+
+	# km to m
+	CAmin <- include * 1000
+	CAmax <- exclude * 1000
+
 	if ((CAmax > 0) && (CAmax < Inf)) {
-		ca_remove <- terra::buffer(sp, CAmax) # |> terra::aggregate()
+		ca_remove <- terra::buffer(sp, CAmax) 
 		x <- terra::mask(x, ca_remove, updatevalue=NA)
 	}
 	if (CAmin > 0) {
-		ca_add <- terra::buffer(sp, CAmin, quadsegs=12) #|> terra::aggregate()
+		ca_add <- terra::buffer(sp, CAmin, quadsegs=12) 
 		x <- terra::rasterize(ca_add, x, update=TRUE)
 	}
 	if (!is.null(land)) {
 		x <- terra::mask(x, land)
 	} 
+	# terra::ifel(x==1, 1, NA)
 	x
 }
 
@@ -19,8 +27,8 @@ adjust_range <- function(x, sp, land, CAmin=50000, CAmax=250000) {
 
 EnvDist <- function(env, regions, envfun) {
 	e <- terra::extract(env, regions, fun=mean, na.rm=TRUE, ID=FALSE)
-	ed1 <- dist(e[,1])
-	ed2 <- dist(e[,2])	
+	ed1 <- stats::dist(e[,1])
+	ed2 <- stats::dist(e[,2])	
 	ed <- data.frame(ed1, ed2)
 	names(ed) <- names(env)
 	# express environmental distance expressed as geographic distance
@@ -29,7 +37,7 @@ EnvDist <- function(env, regions, envfun) {
 }
 
 
-n_zones <- function(x, min_area, m=3) {
+.n_zones <- function(x, min_area, m=3) {
 	round(pmax(1, pmin(x, m*sqrt(x))))
 }
 
@@ -45,21 +53,19 @@ make_zones <- function(x, range, n, spread=TRUE) {
 		p$n <- round(p$area / avga)
 		totn <- sum(p$n)
 		while (totn > n) {
-#			p$error[i] <- p$area[i] - p$n[i] * avga
 			p$error <- p$area - p$n * avga
 			i <- which.max(p$error)
 			p$n[i] <- p$n[i] - 1
 			totn <- sum(p$n)
 		}
 		while (totn < n) {
-#			p$error[i] <- p$area[i] - p$n[i] * avga
 			p$error <- p$area - p$n * avga
 			i <- which.min(p$error)
 			p$n[i] <- p$n[i] + 1
 			totn <- sum(p$n)
 		}
 		p <- p[p$n > 0, ]
-		seeds <- lapply(1:nrow(p), \(i) {
+		seeds <- lapply(1:nrow(p), function(i) {
 			out <- terra::spatSample(p[i,], p$n[i])
 			if (nrow(out) < p$n[i]) {
 				out <- terra::spatSample(p[i,], p$n[i] * 10)
@@ -68,7 +74,7 @@ make_zones <- function(x, range, n, spread=TRUE) {
 			out
 		}) 
 			
-		seeds <- terra::vect(seeds) |> terra::crds()
+		seeds <- terra::crds(terra::vect(seeds))
 		
 		km <- terra::k_means(terra::mask(x, rr), seeds, iter.max = 25)
 	} else {
@@ -80,58 +86,23 @@ make_zones <- function(x, range, n, spread=TRUE) {
 	terra::as.polygons(km)
 }
 
-
-get_samplesize <- function(x, fun=n_zones, ...) {
+get_samplesize <- function(x, fun=NULL, ...) {
 	if (inherits(x, "SpatRaster")) {
 		x <- terra::as.polygons(x)
 		x <- x[x[,1,drop=TRUE]==1]
 	} else if (!inherits(x, "SpatVector")) {
 		stop("x should be a SpatVector")
 	}
-	a <- terra::expanse(x, unit="km")
+	a <- sum(terra::expanse(x, unit="km"))
+	if (is.null(fun)) {
+		fun <- function(A, omega) max(1, round(omega * sqrt(A/pi)))
+	}
 	n <- fun(a, ...)
 	#n <- max(nmin, n)
 	#z <- max(1, min(n, round(a/min_area)))
 	return(list(range=x, area=a, n=n))
 }
 
-
-branch_length <- function(tree, samp, adjust, adjfun=log10 ) {
-
-## TODO take into account that you may need multiple obs per leaf
-
-	if (adjust) {
-		tab <- table(samp)
-		tab <- adjfun(tab) + 1
-		# or? 
-		# tab <- pmax(1, adjfun(tab))
-
-	}
-	sample <- as.character(unique(samp))
-    if (is.null(tree$edge.length)) {stop("Tree has no branch lengths, cannot compute pd") }
-    
-	absent <- tree$tip.label[!(tree$tip.label %in% sample)]
-    if (length(sample) == 0) {
-        GD <- 0
-    } else if (length(sample) == 1) {
-		# also adjust for sample size
-        GD <- max(tree$edge.length)
-    } else if (length(absent) == 0) {
-		if (adjust) {
-			i <- match(names(tab), tree$tip.label)
-			tree$edge.length[i] <- tree$edge.length[i] * tab
-		}
-        GD <- sum(tree$edge.length)
-    } else {
-        tree <- ape::drop.tip(tree, absent)
-		if (adjust) {
-			i <- match(names(tab), tree$tip.label)
-			tree$edge.length[i] <- tree$edge.length[i] * tab
-        }
-		GD <- sum(tree$edge.length)
-    }
-    return(GD)
-}
 
 
 small_ssize_penalty <- function(ssize, score, minssize=10) {
@@ -140,50 +111,8 @@ small_ssize_penalty <- function(ssize, score, minssize=10) {
 }
 
 
-get_cover <- function(regions, sample, env=NULL, adjust=TRUE, minssize=10) {
 
-## TODO  RH
-# fix the adjust effect such that when you have many observations in one zones
-# they can only contribute to their neighbors. Do not increase branch length to avoid that
-# one region does not compensate for another
-
-	stopifnot(minssize > 0)
-		
-	if (nrow(regions) == 1) {
-		# cannot make a tree 
-
-		return(99)
-	}
-		
-	xy <- terra::centroids(regions)
-	if (!is.null(env)) {
-		# use the ClustGeo approach?
-		e <- terra::extract(env, regions, fun=mean, na.rm=TRUE)
-		d <- terra::distance(cbind(xy, e))
-	} else {
-		d <- terra::distance(xy, unit="km")
-	}
-
-	x <- stats::hclust(d)
-	x <- ape::as.phylo(x)
-	terra::values(regions) <- NULL
-	
-	# if nsamples for a region > threshold (10) one neighbor that is empty can get an observation
-	##
-	
-	s <- terra::extract(regions, sample)
-
-	actual_pd <- branch_length(x, s[,2], adjust=adjust)	
-	potential_pd <- branch_length(x, 1:nrow(regions), adjust=adjust)
-	score <- min(1, actual_pd/potential_pd)
-	
-	small_ssize_penalty(length(sample), score, minssize)
-	
-}
-
-
-
-get_network2 <- function(regions, sample, maxdist=1500) {
+get_network <- function(regions, sample, maxdist=1500) {
 
 	terra::values(regions) <- data.frame(id=1:nrow(regions))
 	patches <- terra::disagg(terra::aggregate(regions))
@@ -241,10 +170,10 @@ get_network2 <- function(regions, sample, maxdist=1500) {
 		adj <- adj[adj$adj != 0, ]
 		nx <- nrow(x)
 		padj <- padj[order(padj$dst), ]
-		g <- igraph::graph_from_data_frame(adj, directed = FALSE) |> igraph::components()
+		g <- igraph::components( igraph::graph_from_data_frame(adj, directed = FALSE) )
 		for (i in 1:nrow(padj)) {
 			adj2 <- rbind(adj, padj[i,])
-			gg <- igraph::graph_from_data_frame(adj2, directed = FALSE) |> igraph::components()
+			gg <- igraph::components( igraph::graph_from_data_frame(adj2, directed = FALSE) )
 			if ((gg$no < g$no) | (length(gg$membership) > length(g$membership))) {
 				g <- gg
 				adj <- adj2
@@ -260,21 +189,26 @@ get_network2 <- function(regions, sample, maxdist=1500) {
 }
 
 
+make_spatvect <- function(rr) {
+	x <- as.matrix(rr[, c("xf", "yf", "xt", "yt")])
+	a <- lapply(1:nrow(x), \(i)  cbind(i, matrix(x[i,], nrow=2, byrow=2)))
+	b <- do.call(rbind, a)
+	v <- terra::vect(b, "lines", crs="lonlat")
+	terra::values(v) <- rr
+	v
+}
 
-XC <- function(regions, sample, env=NULL, envfun=NULL, minssize=10, maxlink=1500, return_network=FALSE) {
+
+XC <- function(regions, sample, env=NULL, envfun=NULL, minssize=10, maxdist=1500, return_network=FALSE) {
 
 ## TODO  RH
-# fix the adjust effect such that when you have many observations in one zones
+# refine the adjust effect such that when you have many observations in one zones
 # they can only contribute to their neighbors. Do not increase branch length to avoid that
 # one region does not compensate for another
 
 	stopifnot(minssize > 0)
 
-#
-# weed=TRUE
-# land=NULL
-#	rr <- get_network1(regions, sample, land=land, maxlink=maxlink, weed=weed)
-	rr <- get_network2(regions, sample, maxlink)
+	rr <- get_network(regions, sample, maxdist)
 	if (return_network) {
 		return(make_spatvect(rr))
 	}
@@ -309,7 +243,7 @@ XC <- function(regions, sample, env=NULL, envfun=NULL, minssize=10, maxlink=1500
 		igraph::E(g)$weight <- igraph::E(g)$weight2
 
 		if (length(y) > 1) {
-			b <- combn(as.character(y), 2)
+			b <- utils::combn(as.character(y), 2)
 			nms <- igraph::V(g)$name
 			haveb <- apply(matrix(b %in% nms, nrow=2), 2, all)
 			b <- b[,haveb,drop=FALSE]
@@ -325,7 +259,7 @@ XC <- function(regions, sample, env=NULL, envfun=NULL, minssize=10, maxlink=1500
 		score[k] <- 1 - (sum(d2) / d1)
 		nodes[k] <- length(g)
 	}
-	score <- weighted.mean(score, nodes)
+	score <- stats::weighted.mean(score, nodes)
 	
 	score <- small_ssize_penalty(length(sample), score, minssize)
 	list(XC=score, dist=rr)

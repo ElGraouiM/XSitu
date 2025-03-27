@@ -1,17 +1,16 @@
 Package: XSitu
 Type: Package
-Title: Ex-Situ conservation gap analysis
-Version: 1.0-0
-Date: 2023-10-28
-Imports: ape, terra
-Maintainer: Marwa El Graoui <r.hijmans@gmail.com>
-Author: Marwa El Graoui <r.hijmans@gmail.com>
-Description: What the package does (one paragraph).
+Title: Ex-Situ conservation status
+Description: This package implements a method to evaluate the ex-situ conservation status of a species. The method is described in: El Graoui, M., M.E. Ghanem, M. Amri, R.J. Hijmans, 2025. A distance-based framework for assessing the ex-situ conservation status of plants. Submitted for publication. 
+Version: 1.1-0
+Date: 2025-03-26
+Depends: R (>= 3.5.0)
+Imports: terra, igraph
+Maintainer: Robert Hijmans <r.hijmans@gmail.com>
 Encoding: UTF-8
 License: GPL (>=3)
 BugReports: https://github.com/rspatial/terra/issues/
 LazyLoad: yes
 Authors@R: c(
-	person("Marwa", "El Graoui", role = c("cre", "aut"),  
-			email = "marwa@gmail.com", comment = c(ORCID = "0000-0000-0000-0000")),
-    person("Marwa", "El Graoui", role = c("aut"), comment = c(ORCID = "0000-0003-2392-6140")))
+	person("Marwa", "El Graoui", role="aut"),
+    person("Robert J.", "Hijmans", role=c("cre", "aut"), email="r.hijmans@gmail.com", comment=c(ORCID = "0000-0003-2392-6140")))
