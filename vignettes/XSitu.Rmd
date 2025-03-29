@@ -1,0 +1,125 @@
+---
+title: "The XSitu package"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{An Introduction to My Package}
+  %\VignetteEngine{knitr::rmarkdown}
+---
+
+## Introduction
+
+*R* package XSitu implements methods to support computing the ex-situ conservation status of organisms, as decribed in 
+
+El Graoui, M., M.E. Ghanem, M. Amri, R.J. Hijmans, 2025. *A distance-based framework for assessing the ex-situ conservation status of plants*. Submitted for publication. 
+
+You can install the package from github with 
+
+```
+remotes::install.packages("cropmodels/XSitu") 
+```
+
+### Example data 
+
+We first load the package and the example data.  
+
+```{r data}
+library(XSitu)
+library(terra)
+
+rnge <- terra::rast(system.file("ex/range.tif", package="XSitu"))
+land <- terra::readRDS(system.file("ex/land.rds", package="XSitu"))
+sp <- terra::readRDS(system.file("ex/sp.rds", package="XSitu"))
+```
+
+`rnge` is a SpatRaster with the range our example species *Vigna friesiorum*. The range map was predicted with a Species Distribution Model (SDM). We used *R* package "predicts" for that, but we do not show that here. `land` is a SpatVector of polygons delimiting the areas where the species can occur (on land, in this case), and `sp` is a SpatVector of points, showing the locations of know occurrence of the species.
+
+`rnge` has values of (`1`) where the environment is suitable for the species according to the SDM, and missing values (`NA`) where it is not suitable. To better illustrate the data we first compute a SpatRaster `xrange` that has values of `1` for land areas where the environment is not suitable and `2` for areas where it is suitable. . 
+
+```{r plotpts, fig.dim = c(6, 5)}
+rland <- rasterize(land, rnge)
+xrange <- sum(c(rland, rnge), na.rm=TRUE)
+plot(xrange, col=c("light gray", "orange"), colNA="azure", mar=c(1,2,1,5),
+     levels=c("absent", "present"), type="classes")
+lines(land, lwd=2)
+plot(sp, "species", col="blue", plg=list(nudge=c(0,-2), text.font=3), cex=.75, add=TRUE)
+``` 
+
+### Range adjustment 
+
+Now we adjust the range of the species. An inclusion buffer is used to include areas near locations with known occurrence, and an exclusion buffer is used to exclude areas that are further away from these locations.
+
+ 
+```{r adjust}
+r_adj <- adjust_range(rnge, sp, land, include=50, exclude=250)
+r_adj
+```
+
+We compute some data to illustrate the effect. 
+
+
+```{r adjdata}
+xr <- sum(c(rland, rnge, r_adj+1), na.rm=TRUE)
+bb <- rbind(terra::buffer(sp, 50000), terra::buffer(sp, 250000))
+bb$size <- rep(c("include", "exclude"), each=nrow(sp))
+bb <- terra::as.lines(terra::aggregate(bb, "size"))
+```
+
+And make a map
+
+```{r plotadj, fig.dim = c(6, 5)}
+plot(xr, levels=c("Unsuitable", "Removed", "Added", "Kept"), type="classes", 
+      plg=list(title="Range"), mar=c(2,1,1,6), col=c("light gray", map.pal("viridis", 3)))
+lines(land, lwd=4, col="light gray")
+plot(bb, "size", col=c("darkgreen", "red"), add=TRUE, sort=FALSE, type="classes", lwd=2,
+			plg=list(nudge=c(0,-5), title="Buffer", lwd=2))
+plot(sp, "species", col="blue", add=TRUE, plg=list(nudge=c(0,-9), text.font=3), cex=.75)
+```
+
+### Compute number of zones
+
+Now we compute the sample-size (number of zones) associated with a species' range. 
+
+```{r ssize}
+k <- get_samplesize(r_adj, omega=1/40)
+```
+
+
+### Make zones
+
+And we compute the zones
+
+```{r zones}
+xy <- c(terra::init(r_adj, "x"), terra::init(r_adj, "y"))
+set.seed(321)
+zones <- make_zones(xy, k$range, k$n, spread=TRUE)
+```
+
+### Geo-environmental distance 
+
+env distance 
+
+```{r envd}
+mprc <- readRDS(system.file("ex/m_prc.rds", package="XSitu"))
+mtmp <- readRDS(system.file("ex/m_tmp.rds", package="XSitu"))
+env <- terra::rast(system.file("ex/env.tif", package="XSitu"))
+
+envdist <- function(x) {
+	x$tmp[x$tmp > 13] <- 13 
+	x$prc[x$prc > 2000] <- 2000
+	p_tmp <- predict(mtmp, x)
+	p_pr <- predict(mprc, x)
+	rowMeans(cbind(p_tmp, p_pr))
+}
+```
+
+
+### Conservation score
+
+Compute XC 
+
+```{r XC}
+x <- XC(zones, sp[sp$sample_type=="seed"], env=env, envfun=envdist, minssize=10, maxdist=1500, return_network=FALSE)
+x$XC 
+head(x$dist)
+``` 
+

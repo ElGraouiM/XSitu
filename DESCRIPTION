@@ -6,6 +6,8 @@ Version: 1.1-0
 Date: 2025-03-26
 Depends: R (>= 3.5.0)
 Imports: terra, igraph
+Suggests: knitr, rmarkdown
+VignetteBuilder: knitr
 Maintainer: Robert Hijmans <r.hijmans@gmail.com>
 Encoding: UTF-8
 License: GPL (>=3)
